@@ -4,82 +4,42 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
-// =========================
+// ========================
 // ✅ CHANGE PROFILE
-// =========================
-export const changeProfile = asyncHandler(async (req, res) => {
-  const profileImage = req.file?.path;
-  try {
-    if (!profileImage) {
-      const apiError = new ApiError(400, "Profile image is required!");
-      return apiError.send(res);
-    }
-
-    // Check if the user exists
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      const apiError = new ApiError(404, "User not found!");
-      return apiError.send(res);
-    }
-
-    // Delete old image from Cloudinary if it exists
-    if (user.profileImage) {
-      try {
-        // Extract public_id from the Cloudinary URL
-        const publicId = user.profileImage.split('/').pop().split('.')[0];
-        await deleteFromCloudinary(publicId);
-        console.log(`Deleted old image: ${publicId}`);
-      } catch (deleteError) {
-        console.error("Error deleting old image:", deleteError);
-        // Continue with upload even if deletion fails
-      }
-    }
-
-    // Upload new image to Cloudinary
-    const cloudinaryResponse = await uploadOnCloudinary(profileImage);
-
-    if (!cloudinaryResponse) {
-      const apiError = new ApiError(500, "Failed to upload image to Cloudinary!");
-      return apiError.send(res);
-    }
-
-    const updatedUser = User.findByIdAndUpdate(
-      req.user._id, 
-      { 
-        profileImage: cloudinaryResponse.secure_url 
-      }, 
-      { 
-        new: true 
-      }
-    );
-    
-    if (!updatedUser) {
-      const apiError = new ApiError(404, "User not found!");
-      return apiError.send(res);
-    }
-
-    return res.status(200).json(new ApiResponse(200, user, "Profile updated successfully"));
-  } catch (err) {
-    const apiError = new ApiError(500, "Profile update failed!", err.message);
-    return apiError.send(res);
-  }
-});
-
-// =======================
-// ✅ UPDATE ACCOUNT INFO
-// =======================
-export const updateAccountInfo = asyncHandler(async (req, res) => {
+// ========================
+export const updateUserProfile = asyncHandler(async (req, res) => {
   const { name, email, phone, address } = req.body;
+  const profileImage = req.file?.path;
 
   try {
     const user = await User.findById(req.user._id);
 
     if (!user) {
-      const apiError = new ApiError(404, "User not found!");
-      return apiError.send(res);
+      return new ApiError(404, "User not found!").send(res);
     }
 
+    // Update profile image if provided
+    if (profileImage) {
+      // Delete old image from Cloudinary
+      if (user.profileImage) {
+        try {
+          const publicId = user.profileImage.split('/').pop().split('.')[0];
+          await deleteFromCloudinary(publicId);
+        } catch (deleteErr) {
+          console.error("Failed to delete old profile image:", deleteErr);
+          // Continue anyway
+        }
+      }
+
+      const cloudinaryResponse = await uploadOnCloudinary(profileImage);
+      if (!cloudinaryResponse) {
+        return new ApiError(500, "Failed to upload new image to Cloudinary!").send(res);
+      }
+
+      user.profileImage = cloudinaryResponse.secure_url;
+    }
+
+    // Update other fields if provided
     if (name) user.name = name;
     if (email) user.email = email;
     if (phone) user.phone = phone;
@@ -87,10 +47,11 @@ export const updateAccountInfo = asyncHandler(async (req, res) => {
 
     await user.save();
 
-    return res.status(200).json(new ApiResponse(200, user, "Account info updated successfully"));
+    return res.status(200).json(
+      new ApiResponse(200, user, "Profile updated successfully")
+    );
   } catch (err) {
-    const apiError = new ApiError(500, "Account info update failed!", err.message);
-    return apiError.send(res);
+    return new ApiError(500, "Profile update failed!", err.message).send(res);
   }
 });
 
@@ -137,9 +98,6 @@ export const getAllUsers = asyncHandler(async (req, res) => {
 // ===========================
 export const getSingleUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
-  console.log("user Id: ", id);
-
   try {
     const user = await User.findById(id).select("-password");
 
@@ -196,15 +154,20 @@ export const deleteAllUsers = asyncHandler(async (req, res) => {
 export const updateUserRoleAndInfo = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { role, name, email, phone, address } = req.body;
-  
+
     try {
+      if (!id) {
+        const apiError = new ApiError(400, "User ID is required!");
+        return apiError.send(res);
+      }
+
       const user = await User.findById(id);
   
       if (!user) {
         const apiError = new ApiError(404, "User not found!");
         return apiError.send(res);
       }
-  
+
       if (role) user.role = role;
       if (name) user.name = name;
       if (email) user.email = email;
@@ -223,7 +186,7 @@ export const updateUserRoleAndInfo = asyncHandler(async (req, res) => {
 // ===================
 // ✅ ADMIN DASHBOARD
 // ===================
-  export const adminDashboard = asyncHandler(async (req, res) => {
+  export const getAdminDashboard = asyncHandler(async (req, res) => {
     try {
       const totalUsers = await User.countDocuments();
   
