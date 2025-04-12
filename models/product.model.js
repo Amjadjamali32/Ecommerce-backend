@@ -20,7 +20,7 @@ const productSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
-    enum: ['Sedan', 'SUV', 'Truck', 'Coupe','Wagon'],
+    enum: ['Sedan', 'SUV', 'Truck', 'Coupe', 'Hatchback'],
   },
   stock: {
     type: Number,

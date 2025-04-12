@@ -1,12 +1,12 @@
 import router from "express";
-import { fileUploadMiddleware } from "../middlewares/multer.js";
+import { profileImageUpload } from "../middlewares/multer.js";
 import { protect, admin } from "../middlewares/auth.js";
 import { getAdminDashboard, updateUserProfile, getAllUsers, getCurrentUser, getSingleUser, deleteAllUsers, deleteUser, updateUserRoleAndInfo } from "../controllers/user.controllers.js"
 
 const userRouter = router.Router();
 
 // user routes
-userRouter.route("/update-profile").put(protect, fileUploadMiddleware, updateUserProfile);
+userRouter.route("/update-profile").put(protect, updateUserProfile, profileImageUpload);
 userRouter.route("/profile").get(protect, getCurrentUser);
 
 // admin routes

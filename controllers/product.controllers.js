@@ -3,10 +3,11 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import mongoose from "mongoose";
 
-// =========================
+// =============================
 // ✅ GET ALL PRODUCTS (PUBLIC)
-// =========================
+// =============================
 export const getAllProducts = asyncHandler(async (req, res) => {
   try {
     // Pagination
@@ -65,9 +66,9 @@ export const getAllProducts = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// ================================
 // ✅ GET PRODUCT DETAILS (PUBLIC)
-// =============================
+// ================================
 export const getProductDetails = asyncHandler(async (req, res) => {
   const { productId } = req.params;
 
@@ -88,9 +89,9 @@ export const getProductDetails = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// ================================
 // ✅ CREATE PRODUCT REVIEW (USER)
-// =============================
+// ================================
 export const createProductReview = asyncHandler(async (req, res) => {
   const { productId } = req.params;
   const { rating, comment } = req.body;
@@ -145,9 +146,9 @@ export const createProductReview = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// ================================
 // ✅ GET PRODUCT REVIEWS (PUBLIC)
-// =============================
+// ================================
 export const getProductReviews = asyncHandler(async (req, res) => {
   const { productId } = req.params;
 
@@ -168,45 +169,55 @@ export const getProductReviews = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
-// ✅ DELETE PRODUCT REVIEW (USER/ADMIN)
-// =============================
+// =====================================
+// ✅ DELETE PRODUCT REVIEW (USER/ADMIN) 
+// =====================================
 export const deleteProductReview = asyncHandler(async (req, res) => {
   const { productId, reviewId } = req.params;
+  console.log(req.user);
+  
+
+  // Validate ObjectIds
+  if (!mongoose.Types.ObjectId.isValid(productId) || !mongoose.Types.ObjectId.isValid(reviewId)) {
+    return new ApiError(400, "Invalid product or review ID").send(res);
+  }
+
+  console.log("Deleting review:", { productId, reviewId, requestedBy: req.user._id });
 
   try {
     const product = await Product.findById(productId);
 
     if (!product) {
-      const apiError = new ApiError(404, "Product not found");
-      return apiError.send(res);
+      return new ApiError(404, "Product not found").send(res);
     }
 
-    // Find review
     const review = product.reviews.find(
       item => item._id.toString() === reviewId
     );
 
     if (!review) {
-      const apiError = new ApiError(404, "Review not found");
-      return apiError.send(res);
+      return new ApiError(404, "Review not found").send(res);
     }
 
     // Check if user is review owner or admin
-    if (review.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-      const apiError = new ApiError(403, "You are not authorized to delete this review");
-      return apiError.send(res);
+    if (
+      review.user.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return new ApiError(403, "You are not authorized to delete this review").send(res);
     }
 
-    // Remove review
+    // Remove the review
     product.reviews = product.reviews.filter(
       item => item._id.toString() !== reviewId
     );
 
-    // Update rating
+    // Update product stats
     product.numOfReviews = product.reviews.length;
-    product.rating = product.reviews.length > 0
-      ? product.reviews.reduce((acc, item) => item.rating + acc, 0) / product.reviews.length
+
+    const totalRating = product.reviews.reduce((acc, item) => acc + item.rating, 0);
+    product.rating = product.numOfReviews > 0
+      ? totalRating / product.numOfReviews
       : 0;
 
     await product.save();
@@ -214,15 +225,16 @@ export const deleteProductReview = asyncHandler(async (req, res) => {
     return res.status(200).json(
       new ApiResponse(200, {}, "Review deleted successfully")
     );
+
   } catch (err) {
-    const apiError = new ApiError(500, "Failed to delete review", err.message);
-    return apiError.send(res);
+    console.error("Error deleting review:", err);
+    return new ApiError(500, "Failed to delete review", err.message).send(res);
   }
 });
 
-// =============================
-// ✅ GET SELLER PRODUCTS (SELLER)
-// =============================
+// ================================
+// ✅ GET SELLER PRODUCTS (SELLER)  
+// ================================
 export const getSellerProducts = asyncHandler(async (req, res) => {
   try {
     const products = await Product.find({ seller: req.user._id });
@@ -252,13 +264,16 @@ export const adminGetAllProducts = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// ==================================
 // ✅ ADMIN DASHBOARD PRODUCTS STATS
-// =============================
+// ==================================
 export const adminProductStats = asyncHandler(async (req, res) => {
   try {
     const totalProducts = await Product.countDocuments();
-    const totalCategories = await Product.distinct('category').count();
+
+    const distinctCategories = await Product.distinct('category');
+    const totalCategories = distinctCategories.length;
+
     const newestProducts = await Product.find()
       .sort('-createdAt')
       .limit(5)
@@ -281,9 +296,9 @@ export const adminProductStats = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// =====================================
 // ✅ FEATURE/UNFEATURE PRODUCT (ADMIN)
-// =============================
+// =====================================
 export const toggleProductFeature = asyncHandler(async (req, res) => {
   const { productId } = req.params;
 
@@ -311,91 +326,98 @@ export const toggleProductFeature = asyncHandler(async (req, res) => {
   }
 });
 
-// =============================
+// =================================
 // ✅ CREATE PRODUCT (ADMIN/SELLER)
-// =============================
+// =================================
 export const createProduct = asyncHandler(async (req, res) => {
-    try {
-      const {
-        name,
-        description,
-        price,
-        category,
-        stock,
-        condition,
-        year,
-        mileage,
-        make,
-        model,
-        engineType,
-        color,
-        transmission,
-        fuelType,
-        location,
-        features,
-        topSpeed
-      } = req.body;
-  
-      // Validate required fields
-      if (!name || !description || !price || !category || !make || !model) {
-        const apiError = new ApiError(400, "Required fields are missing");
-        return apiError.send(res);
-      }
-  
-      // Handle image uploads
-      const images = [];
-      if (req.files && req.files.images) {
-        for (const file of req.files.images) {
-          const cloudinaryResponse = await uploadOnCloudinary(file.path);
-          if (cloudinaryResponse) {
-            images.push(cloudinaryResponse.secure_url);
-          }
-        }
-      }
-  
-      if (images.length === 0) {
-        const apiError = new ApiError(400, "At least one product image is required");
-        return apiError.send(res);
-      }
-  
-      // Create product
-      const product = await Product.create({
-        name,
-        description,
-        price,
-        images,
-        category,
-        stock,
-        condition,
-        year,
-        mileage,
-        make,
-        model,
-        engineType,
-        color,
-        transmission,
-        fuelType,
-        location,
-        seller: req.user._id,
-        features: features ? features.split(',') : [],
-        topSpeed
-      });
-  
-      return res.status(201).json(
-        new ApiResponse(201, product, "Product created successfully")
-      );
-    } catch (err) {
-      const apiError = new ApiError(500, "Failed to create product", err.message);
+  try {
+    const {
+      name,
+      description,
+      price,
+      category,
+      stock,
+      condition,
+      year,
+      mileage,
+      make,
+      model,
+      engineType,
+      color,
+      transmission,
+      fuelType,
+      location,
+      features,
+      topSpeed
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !description || !price || !category || !make || !model) {
+      const apiError = new ApiError(400, "Required fields are missing");
       return apiError.send(res);
     }
+
+    // Handle image uploads
+    const images = [];
+    if (req.files) {
+      for (const file of req.files) {
+        const cloudinaryResponse = await uploadOnCloudinary(file.path);
+        if (cloudinaryResponse) {
+          images.push(cloudinaryResponse.secure_url);
+        }
+      }
+    }
+
+    if (!images.length) {
+      return new ApiError(400, "At least one product image is required").send(res);
+    }
+
+    // Normalize features
+    let featureList = [];
+    if (typeof features === 'string') {
+      featureList = features.split(',').map(f => f.trim());
+    } else if (Array.isArray(features)) {
+      featureList = features;
+    }
+
+    // Create product
+    const product = await Product.create({
+      name,
+      description,
+      price,
+      images,
+      category,
+      stock,
+      condition,
+      year,
+      mileage,
+      make,
+      model,
+      engineType,
+      color,
+      transmission,
+      fuelType,
+      location,
+      seller: req.user._id,
+      features: featureList,
+      topSpeed
+    });
+
+    return res.status(201).json(
+      new ApiResponse(201, product, "Product created successfully")
+    );
+
+  } catch (err) {
+    const apiError = new ApiError(500, "Failed to create product", err.message);
+    return apiError.send(res);
+  }
 });
-  
-// =============================
-// ✅ UPDATE PRODUCT (ADMIN/SELLER)
-// =============================
+
+// =================================
+// ✅ UPDATE PRODUCT (ADMIN/SELLER)  
+// =================================
 export const updateProduct = asyncHandler(async (req, res) => {
     const { productId } = req.params;
-  
     try {
       const product = await Product.findById(productId);
   
@@ -411,7 +433,7 @@ export const updateProduct = asyncHandler(async (req, res) => {
       }
   
       // Handle image updates
-      if (req.files && req.files.images) {
+      if (req.files && req.files) {
         // Delete old images from Cloudinary
         for (const imageUrl of product.images) {
           try {
@@ -424,7 +446,7 @@ export const updateProduct = asyncHandler(async (req, res) => {
   
         // Upload new images
         const newImages = [];
-        for (const file of req.files.images) {
+        for (const file of req.files) {
           const cloudinaryResponse = await uploadOnCloudinary(file.path);
           if (cloudinaryResponse) {
             newImages.push(cloudinaryResponse.secure_url);
@@ -449,11 +471,13 @@ export const updateProduct = asyncHandler(async (req, res) => {
     }
 });
   
-// =============================
-// ✅ DELETE PRODUCT (ADMIN/SELLER)
-// =============================
+// =================================
+// ✅ DELETE PRODUCT (ADMIN/SELLER) 
+// =================================
 export const deleteProduct = asyncHandler(async (req, res) => {
     const { productId } = req.params;
+    console.log("Deleting product:", productId);
+    
   
     try {
       const product = await Product.findById(productId);
