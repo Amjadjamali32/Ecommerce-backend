@@ -4,26 +4,30 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import Stripe from "stripe";
+import path from "path";
+import fs from "fs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// =============================
-// ✅ CREATE ORDER (USER)
-// =============================
+// ==================================
+// ✅ CREATE ORDER(USER)
+// ==================================
 export const createOrder = asyncHandler(async (req, res) => {
-  const { 
-    shippingInfo, 
-    orderItems, 
+  const {
+    shippingInfo,
+    orderItems,
     paymentMethod,
     itemsPrice,
     taxPrice,
     shippingPrice,
-    totalPrice 
+    totalPrice,
   } = req.body;
+
 
   // Validate required fields
   if (!shippingInfo || !orderItems || orderItems.length === 0 || !paymentMethod) {
-    throw new ApiError(400, "Required fields are missing");
+    const apiError = new ApiError(400, "Required fields are missing!");
+    return apiError.send(res);
   }
 
   // Validate and process order items
@@ -31,11 +35,13 @@ export const createOrder = asyncHandler(async (req, res) => {
   for (const item of orderItems) {
     const product = await Product.findById(item.product);
     if (!product) {
-      throw new ApiError(404, `Product not found: ${item.product}`);
+      const apiError = new ApiError(404, `Product not found: ${item.product}!`);
+      return apiError.send(res);
     }
 
     if (product.stock < item.quantity) {
-      throw new ApiError(400, `Insufficient stock for product: ${product.name}`);
+      const apiError = new ApiError(400, `Insufficient stock for product: ${product.name}!`);
+      return apiError.send(res);
     }
 
     items.push({
@@ -43,55 +49,61 @@ export const createOrder = asyncHandler(async (req, res) => {
       price: product.price,
       image: product.images[0],
       product: product._id,
-      quantity: item.quantity
+      quantity: item.quantity,
     });
   }
 
-  // Create order (initially unpaid)
-  const order = await Order.create({
+  // Create order with temporary paymentInfo.id
+  let order = await Order.create({
     user: req.user._id,
     shippingInfo,
     orderItems: items,
     paymentInfo: {
+      id: 'temp', // temporary value
       method: paymentMethod,
-      status: 'pending'
+      status: 'pending',
     },
     itemsPrice,
     taxPrice,
     shippingPrice,
-    totalPrice
+    totalPrice,
   });
 
-  // For card payments, create Stripe payment intent
+  // Handle card payments
   if (paymentMethod === 'card') {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(totalPrice * 100), // Convert to cents
       currency: 'usd',
-      metadata: { 
+      metadata: {
         orderId: order._id.toString(),
-        userId: req.user._id.toString()
+        userId: req.user._id.toString(),
       },
     });
 
+    // Update order with Stripe paymentIntent ID
+    order.paymentInfo.id = paymentIntent.id;
+    await order.save();
+
     return res.status(201).json(
       new ApiResponse(
-        201, 
-        { 
+        201,
+        {
           order,
-          clientSecret: paymentIntent.client_secret 
-        }, 
-        "Order created successfully. Please complete payment."
+          clientSecret: paymentIntent.client_secret,
+        },
+        'Order created successfully. Please complete payment.'
       )
     );
   }
 
-  // For cash on delivery
-  return res.status(201).json(
-    new ApiResponse(
-      201, 
-      order, 
-      "Order created successfully. Payment will be collected on delivery."
-    )
+  // For COD orders, update paymentInfo.id to 'manual'
+  order.paymentInfo.id = 'manual';
+  await order.save();
+
+  return res
+  .status(201)
+  .json(
+    new ApiResponse(201, order, 'Order created successfully. Payment will be collected on delivery.')
   );
 });
 
@@ -101,33 +113,34 @@ export const createOrder = asyncHandler(async (req, res) => {
 export const confirmStripePayment = asyncHandler(async (req, res) => {
   const { paymentIntentId, orderId } = req.body;
 
-  // Validate input
   if (!paymentIntentId || !orderId) {
-    throw new ApiError(400, "Payment intent ID and order ID are required");
+    const apiError = new ApiError(404, "Payment intent ID and order ID are required!");
+    return apiError.send(res);
   }
 
-  // Retrieve payment intent from Stripe
   const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
-  // Verify payment succeeded
-  if (paymentIntent.status !== 'succeeded') {
-    throw new ApiError(400, "Payment not succeeded");
+  console.log(paymentIntent.status); // Debugging line
+
+  if (paymentIntent.status !== 'Succeeded') {
+    const apiError = new ApiError(400, "Payment not succeeded!");
+    return apiError.send(res);
   }
 
-  // Find and update order
-  const order = await Order.findById(orderId);
+  const order = await Order.findById(orderId).populate('user', 'name email');
   if (!order) {
-    throw new ApiError(404, "Order not found");
+    const apiError = new ApiError(404, "Order not found!");
+    return apiError.send(res);
+  } 
+
+  if (order.user._id.toString() !== req.user._id.toString()) {
+    const apiError = new ApiError(403, "Not authorized to update this order!");
+    return apiError.send(res);
   }
 
-  // Verify order belongs to user
-  if (order.user.toString() !== req.user._id.toString()) {
-    throw new ApiError(403, "Not authorized to update this order");
-  }
-
-  // Verify order isn't already paid
   if (order.paymentInfo.status === 'succeeded') {
-    throw new ApiError(400, "Order is already paid");
+    const apiError = new ApiError(400, "Order is already paid!");
+    return apiError.send(res);
   }
 
   // Update order status
@@ -138,8 +151,7 @@ export const confirmStripePayment = asyncHandler(async (req, res) => {
     paidAt: Date.now()
   };
   order.orderStatus = 'processing';
-  
-  // Reduce product stock
+
   for (const item of order.orderItems) {
     await Product.findByIdAndUpdate(item.product, {
       $inc: { stock: -item.quantity }
@@ -148,9 +160,32 @@ export const confirmStripePayment = asyncHandler(async (req, res) => {
 
   await order.save();
 
-  return res.status(200).json(
-    new ApiResponse(200, order, "Payment confirmed and order updated successfully")
+  // ✅ Generate receipt
+  const receiptPath = await generateReceipt(order, order.user);
+
+  return res
+  .status(200)
+  .json(
+    new ApiResponse(200, {
+      order,
+      receiptDownloadLink: `/api/orders/receipt/${order._id}`
+    }, "Payment confirmed and receipt generated")
   );
+});
+
+// ==================================
+// ✅ DOWNLOAD RECEIPT (USER)
+// ==================================
+export const downloadReceipt = asyncHandler(async (req, res) => {
+  const { orderId } = req.params;
+  const receiptPath = path.join('receipts', `receipt-${orderId}.pdf`);
+
+  if (!fs.existsSync(receiptPath)) {
+    const apiError = new ApiError(400, "Receipt does not exist!");
+    return apiError.send(res);
+  }
+
+  return res.download(receiptPath, `OrderReceipt-${orderId}.pdf`);
 });
 
 // ==================================
@@ -164,7 +199,7 @@ export const getOrderDetails = asyncHandler(async (req, res) => {
     .populate('orderItems.product', 'name images price');
 
   if (!order) {
-    throw new ApiError(404, "Order not found");
+    throw new ApiError(404, "Order not found!");
   }
 
   // Check if user is order owner or admin
@@ -185,7 +220,14 @@ export const getUserOrders = asyncHandler(async (req, res) => {
     .sort('-createdAt')
     .populate('orderItems.product', 'name images price');
 
-  return res.status(200).json(
+  if(!orders || orders.length === 0) {
+    const apiError = new ApiError(404, "No orders found for this user!");
+    return apiError.send(res);
+  }
+
+  return res
+  .status(200)
+  .json(
     new ApiResponse(200, orders, "User orders fetched successfully")
   );
 });
@@ -206,6 +248,11 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     .populate('user', 'name email')
     .populate('orderItems.product', 'name images price');
 
+  if(!orders || orders.length === 0) {
+    const apiError = new ApiError(404, "No orders found!");
+    return apiError.send(res);
+  }
+
   const totalOrders = await Order.countDocuments();
 
   return res.status(200).json(
@@ -222,26 +269,29 @@ export const getAllOrders = asyncHandler(async (req, res) => {
   );
 });
 
-// =============================
+// ===============================
 // ✅ UPDATE ORDER STATUS (ADMIN)
-// =============================
+// ===============================
 export const updateOrderStatus = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
   const { status } = req.body;
 
   if (!status) {
-    throw new ApiError(400, "Status is required");
+    const apiError = new ApiError(400, "Status is required!");
+    return apiError.send(res);
   }
 
   const order = await Order.findById(orderId);
   if (!order) {
-    throw new ApiError(404, "Order not found");
+    const apiError = new ApiError(404, "Order not found!");
+    return apiError.send(res);
   }
 
   // Validate status transition
-  const validStatuses = ['processing', 'shipped', 'delivered', 'cancelled'];
+  const validStatuses = ['processing', 'shipped', 'delivered', 'cancelled', 'succeeded'];
   if (!validStatuses.includes(status)) {
-    throw new ApiError(400, "Invalid order status");
+    const apiError = new ApiError(400, "Invalid order status!");
+    return apiError.send(res);
   }
 
   // Special handling for cancelled orders
@@ -268,22 +318,22 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
   }
 
   order.orderStatus = status;
-  
+
   // Set deliveredAt date if status is delivered
   if (status === 'delivered') {
     order.deliveredAt = Date.now();
   }
-
   await order.save();
-
-  return res.status(200).json(
+  return res
+  .status(200)
+  .json(
     new ApiResponse(200, order, "Order status updated successfully")
   );
 });
 
-// =============================
+// ===============================
 // ✅ ADMIN DASHBOARD ORDER STATS
-// =============================
+// ===============================
 export const adminOrderStats = asyncHandler(async (req, res) => {
   const totalOrders = await Order.countDocuments();
   const totalSales = await Order.aggregate([
@@ -300,7 +350,6 @@ export const adminOrderStats = asyncHandler(async (req, res) => {
       }
     }
   ]);
-  
   const pendingOrders = await Order.countDocuments({ orderStatus: 'processing' });
   const shippedOrders = await Order.countDocuments({ orderStatus: 'shipped' });
   
@@ -346,7 +395,8 @@ export const deleteOrder = asyncHandler(async (req, res) => {
 
   const order = await Order.findById(orderId);
   if (!order) {
-    throw new ApiError(404, "Order not found");
+    const apiError = new ApiError(404, "Order not found!");
+    return apiError.send(res);
   }
 
   // Restock products if order was processing

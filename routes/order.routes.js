@@ -7,7 +7,8 @@ import {
   getAllOrders,
   updateOrderStatus,
   adminOrderStats,
-  deleteOrder
+  deleteOrder,
+  downloadReceipt,
 } from "../controllers/order.controllers.js";
 import { protect, admin } from "../middlewares/auth.js";
 
@@ -18,15 +19,15 @@ router.route("/")
   .post(protect, createOrder)
   .get(protect, getUserOrders);
 
-router.post("/confirm-payment", protect, confirmStripePayment);
-router.get("/:orderId", protect, getOrderDetails);
+router.route("/confirm-payment").post(protect, confirmStripePayment);
+router.route("/:orderId").get(protect, getOrderDetails);
+router.route("/receipt/:orderId").get(protect, downloadReceipt);
 
 // Admin routes
-router.route("/admin/orders")
-  .get(protect, admin, getAllOrders);
+router.route("/admin/getAllorders").get(protect, admin, getAllOrders);
 
 router.get("/admin/order-stats", protect, admin, adminOrderStats);
-router.route("/admin/orders/:orderId")
+router.route("/admin/:orderId")
   .put(protect, admin, updateOrderStatus)
   .delete(protect, admin, deleteOrder);
 
