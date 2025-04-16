@@ -6,6 +6,12 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import sendEmail  from "../utils/nodemailer.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import passport from "passport";
+import dotenv from "dotenv";
+
+dotenv.config({
+  path: '.env'
+});
 
 // =================
 // ✅ GENERATE OTP
@@ -51,6 +57,7 @@ const generateTokens = async (user) => {
 // ===========================
 export const registerUser = asyncHandler(async (req, res) => {
     const { name, email, password, phone, address } = req.body;
+    console.log("Request Body: ", req.body);
     const profileImage = req.file?.path;
     try {
         if(!email || !password || !name || !phone) {
@@ -87,7 +94,7 @@ export const registerUser = asyncHandler(async (req, res) => {
             profileImage: cloudinaryResponse ? cloudinaryResponse.secure_url : null,
             otp,
             phone,
-            role: 'user',
+            role: 'admin',
             resetToken: null,
             resetTokenExpiry: null,
             refreshToken: null,
@@ -384,4 +391,69 @@ export const logoutUser = asyncHandler(async (req, res) => {
   res.clearCookie("accessToken");
   res.clearCookie("refreshToken");
   return res.status(200).json(new ApiResponse(200, {}, "User logged out successfully"));
+});
+
+// =====================
+// ✅ GOOGLE AUTH URL
+// =====================
+export const getGoogleAuthUrl = asyncHandler(async (req, res) => {
+  const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+  const options = {
+    redirect_uri: process.env.GOOGLE_CALLBACK_URL,
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    access_type: 'offline',
+    response_type: 'code',
+    prompt: 'select_account',
+    scope: [
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ].join(' '),
+  };
+
+  const qs = new URLSearchParams(options);
+  const url = `${rootUrl}?${qs.toString()}`;
+  return res.redirect(url);
+});
+
+// =====================
+// ✅ GOOGLE CALLBACK
+// =====================
+export const googleAuthCallback = asyncHandler(async (req, res, next) => {
+  passport.authenticate('google', {
+    session: false,
+    failureRedirect: process.env.LOGIN_FAILURE_REDIRECT,
+    scope: ['profile', 'email']
+  })(req, res, next);
+}, async (err, user, info) => {
+  if (err || !user) {
+    const apiError = new ApiError(401, 'Google authentication failed!');
+    return apiError.send(res);
+  }
+
+  try {
+    const { accessToken, refreshToken } = await generateTokens(user);
+
+    const isProduction = process.env.NODE_ENV === "production";
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'Strict',
+    };
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, { 
+        ...cookieOptions, 
+        maxAge: 1 * 24 * 60 * 60 * 1000 
+      })
+      .cookie("refreshToken", refreshToken, { 
+        ...cookieOptions, 
+        maxAge: 30 * 24 * 60 * 60 * 1000 
+      })
+      .redirect(process.env.LOGIN_SUCCESS_REDIRECT);
+  } catch (error) {
+    const apiError = new ApiError(500, 'Failed to generate tokens', error.message);
+    return apiError.send(res);
+  }
 });

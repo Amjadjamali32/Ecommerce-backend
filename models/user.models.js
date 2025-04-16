@@ -15,6 +15,11 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Please enter your email!'],
     unique: true,
   },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true 
+  },
   password: {
     trim: true, 
     type: String,

@@ -60,7 +60,7 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
 // ====================
 export const getCurrentUser = asyncHandler(async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
+    const user = await User.findById(req.user._id).select("name email role profileImage phone isVerified createdAt updatedAt");
 
     if (!user) {
       const apiError = new ApiError(404, "User not found!");
