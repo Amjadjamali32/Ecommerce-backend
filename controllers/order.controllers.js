@@ -6,6 +6,9 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import Stripe from "stripe";
 import path from "path";
 import fs from "fs";
+import dotenv from "dotenv";
+
+dotenv.config({ path: '../.env' });
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
