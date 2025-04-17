@@ -115,7 +115,6 @@ export const createOrder = asyncHandler(async (req, res) => {
 // ==================================
 export const confirmStripePayment = asyncHandler(async (req, res) => {
   const { paymentIntentId, orderId } = req.body;
-
   if (!paymentIntentId || !orderId) {
     const apiError = new ApiError(404, "Payment intent ID and order ID are required!");
     return apiError.send(res);
@@ -125,7 +124,7 @@ export const confirmStripePayment = asyncHandler(async (req, res) => {
 
   console.log(paymentIntent.status); // Debugging line
 
-  if (paymentIntent.status !== 'Succeeded') {
+  if (paymentIntent.status !== 'succeeded') {
     const apiError = new ApiError(400, "Payment not succeeded!");
     return apiError.send(res);
   }
@@ -163,6 +162,8 @@ export const confirmStripePayment = asyncHandler(async (req, res) => {
 
   await order.save();
 
+  console.log(order);
+  
   // ✅ Generate receipt
   const receiptPath = await generateReceipt(order, order.user);
 

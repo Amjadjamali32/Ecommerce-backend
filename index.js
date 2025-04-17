@@ -1,9 +1,9 @@
-import connectDB from './config/db_connect.js';
+import connectDB from './src/config/db_connect.js';
 import dotenv from 'dotenv';
 import app from './app.js';
 
 // Load environment variables
-dotenv.config({ path: '.env' });
+dotenv.config({ path: './.env' });
 
 const port = process.env.PORT || 8080;
 

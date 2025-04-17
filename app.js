@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import passport from 'passport';
-import setupPassport from './config/passport.config.js';
+import setupPassport from './src/config/passport.config.js';
 
 const app = express();
 
@@ -22,10 +22,10 @@ app.use(passport.initialize());
 setupPassport();
 
 // Routes 
-import authRouter from './routes/auth.routes.js'
-import userRouter from './routes/user.routes.js'
-import productRouter from './routes/product.routes.js'
-import orderRouter from "./routes/order.routes.js";
+import authRouter from './src/routes/auth.routes.js'
+import userRouter from './src/routes/user.routes.js'
+import productRouter from './src/routes/product.routes.js'
+import orderRouter from "./src/routes/order.routes.js";
 
 // Routes declaration
 app.use("/api/v1/auth" , authRouter);
