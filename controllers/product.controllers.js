@@ -2,6 +2,7 @@ import Product from "../models/product.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import User from "../models/user.models.js";
 import { uploadOnCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 import mongoose from "mongoose";
 
@@ -513,3 +514,102 @@ export const deleteProduct = asyncHandler(async (req, res) => {
       return apiError.send(res);
     }
 });  
+
+// =================================
+// ✅ ADD TO WISHLIST (USER)
+// =================================
+export const addToWishlist = async (req, res) => {
+  try {
+    const { productId } = req.body;
+    const userId = req.user._id;
+
+    console.log("Adding to wishlist:", { productId, userId });
+    
+    // Check if product exists
+    const product = await Product.findById(productId);
+    if (!product) {
+      const apiError = new ApiError(404, "Product not found");
+      return apiError.send(res);
+    }
+
+    const user = await User.findById(userId);
+    
+    // Check if product is already in wishlist
+    if (user.wishlist.includes(productId)) {
+      return res.status(200).json(
+        new ApiResponse(200, { inWishlist: true }, "Product is already in your wishlist")
+      );
+    }
+
+    user.wishlist.push(productId);
+    await user.save();
+
+    return res.status(200).json(
+      new ApiResponse(200, { inWishlist: true }, "Product added to wishlist successfully")
+    );
+  } catch (error) {
+    const apiError = new ApiError(500, error?.message || "Internal server error");
+    return apiError.send(res);
+  }
+};
+
+// =================================
+// ✅ REMOVE FROM WISHLIST (USER)
+// =================================
+export const removeFromWishlist = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const userId = req.user._id;
+
+    // Check if product exists
+    const product = await Product.findById(productId);
+    if (!product) {
+      const apiError = new ApiError(404, "Product not found");
+      return apiError.send(res);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $pull: { wishlist: productId } },
+      { new: true }
+    );
+
+    if (!user) {
+      const apiError = new ApiError(404, "User not found");
+      return apiError.send(res);
+    }
+
+    return res.status(200).json(
+      new ApiResponse(200, { inWishlist: false }, "Product removed from wishlist successfully")
+    );
+  } catch (error) {
+    const apiError = new ApiError(500, error?.message || "Internal server error");
+    return apiError.send(res);
+  }
+};
+
+// =================================
+// ✅ GET WISHLIST (USER)
+// =================================
+export const getWishlist = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId).populate({
+      path: 'wishlist',
+      select: 'name price images category condition make model'
+    });
+
+    if (!user) {
+      const apiError = new ApiError(404, "User not found");
+      return apiError.send(res);
+    }
+
+    return res.status(200).json(
+      new ApiResponse(200, user.wishlist, "Wishlist retrieved successfully")
+    );
+  } catch (error) {
+    const apiError = new ApiError(500, error?.message || "Internal server error");
+    return apiError.send(res);
+  }
+};

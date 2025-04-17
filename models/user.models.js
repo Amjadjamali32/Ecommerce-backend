@@ -62,6 +62,11 @@ const userSchema = new mongoose.Schema({
     type: Date,
     required: [true, 'Please enter OTP expiry date!'],
   },
+  wishlist: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    default: []
+  }],
   refreshToken: String,
 }, {
   timestamps: true,

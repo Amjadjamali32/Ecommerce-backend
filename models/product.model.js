@@ -95,7 +95,6 @@ const productSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  // Added fields for better e-commerce functionality
   numOfReviews: {
     type: Number,
     default: 0,
